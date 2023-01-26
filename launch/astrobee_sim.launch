@@ -8,6 +8,6 @@
         <!-- Spawn Honey -->
         <arg name="honey" value="true"/>
         <!-- <arg name="honey_pose" default="11 -4 4.8 0 0 0 1"/> -->
-        <arg name="honey_pose" default="0 0 0 0 0 0 1"/>
+        <arg name="honey_pose" default="0 1 0 0 0 0.174 0.985"/> <!-- 0.174 0.985"/> -->
     </include>
 </launch>

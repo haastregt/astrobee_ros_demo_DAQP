@@ -75,7 +75,6 @@ class EmbeddedSimEnvironment(object):
             t = np.append(t, t[-1] + self.dt)
             x_vec = np.append(x_vec, np.array(x_next).reshape(12, 1), axis=1)
             u_vec = np.append(u_vec, np.array(u).reshape(6, 1), axis=1)
-            print(x_next)
 
         self.t = t
         self.x_vec = x_vec

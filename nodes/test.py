@@ -8,10 +8,21 @@ import polytope as pc
 from ctypes import *
 from scipy.spatial.transform import Rotation
 
+from MPCParams import MPCParams
+from MPCSolver import MPCSolver
+
+params = MPCParams()
+ctl = MPCSolver(params)
+state = np.zeros((12,1))
+state[0:3] = 0.1
+state[9] = 1
+u_traj = ctl.solve(state)
+print(u_traj)
+'''
 SET_TYPE = "LQR"  # Terminal invariant set type: select 'zero' or 'LQR'
 MPC_HORIZON = 10
 Q = np.eye(12)
-R = np.eye(6) * 0.1
+R = np.eye(6) * 0.2
 referenceTrajectory = np.zeros((12, 1))
 
 # Get the system
@@ -24,7 +35,7 @@ P_LQR = np.matrix(scipy.linalg.solve_discrete_are(A, B, Q, R))
 
 # Instantiate limits
 u_lim = np.array([[0.85, 0.41, 0.41, 0.085, 0.041, 0.041]]).T
-x_lim = np.array([[1.2, 0.1, 0.1,
+x_lim = 100*np.array([[1.2, 0.1, 0.1,
                    0.5, 0.5, 0.5,
                    0.2, 0.2, 0.2,
                    0.1, 0.1, 0.1]]).T
@@ -84,6 +95,19 @@ state[9] = 1
 #u_traj = ctl.GetControl(state)
 #print(u_traj)
 
+sim_env = EmbeddedSimEnvironment(model=honey,
+                                 dynamics=honey.LinearizedDiscreteDynamics,
+                                 controller=ctl.GetControlSimulation,
+                                 time=20)
+
+state = np.zeros((12,1))
+#state[0:3] = 0
+#state[3:6] = 0
+#state[8] = 0.349
+t, y, u = sim_env.run(state)
+sim_env.visualize()
+'''
+
 '''
 import daqp
 import numpy as np
@@ -103,14 +127,3 @@ print("Starting DAQP solving")
 (xstar,fval,exitflag,info) = d.quadprog(H,f,A,bupper,blower,sense)
 print(xstar)
 '''
-
-sim_env = EmbeddedSimEnvironment(model=honey,
-                                 dynamics=honey.LinearizedDiscreteDynamics,
-                                 controller=ctl.GetControlSimulation,
-                                 time=100)
-
-state = np.zeros((12,1))
-state[0:3] = 0.1
-state[3:6] = 0
-t, y, u = sim_env.run(state)
-sim_env.visualize()

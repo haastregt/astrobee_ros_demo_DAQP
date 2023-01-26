@@ -22,27 +22,6 @@ class MPC():
         """
         Constructor for the MPC class.
 
-        :param model: System model
-        :type model: Astrobee
-        :param N: horizion length
-        :type N: int
-        :param Q: state weight matrix, defaults to None
-        :type Q: np.ndarray
-        :param P: terminal state weight matrix, defaults to None
-        :type P: np.ndarray
-        :param R: control weight matrix, defaults to None
-        :type R: np.ndarray
-        :param ulb: control lower bound vector, defaults to None
-        :type ulb: np.ndarray, optional
-        :param uub: control upper bound vector, defaults to None
-        :type uub: np.ndarray, optional
-        :param xlb: state lower bound vector, defaults to None
-        :type xlb: np.ndarray, optional
-        :param xub: state upper bound vector, defaults to None
-        :type xub: [type], optional
-        :param terminal_constraint: terminal constriant polytope, defaults to None
-        :type terminal_constraint: Polytope, optional
-
         Input is in the MPC form:
             min u       0.5*x_N^T*Q_f*x_N _ 0.5*sum(x_k^T*Q*z_k + u_k^T*R*u_k)
             subject to  x_k+1 = Ad*x_k + Bd*u_k
@@ -61,6 +40,7 @@ class MPC():
         self.dt = model.dt
         self.Nx, self.Nu = model.n, model.m
         self.Nt = N
+        self.ref = None
 
         # TODO make sure there is some checking in case of un-supplied
         # optional arguments
@@ -100,7 +80,7 @@ class MPC():
                                 np.tile(uub.squeeze(), self.Nt),
                                 np.tile(-ulb.squeeze(), self.Nt)))
         else:
-            self.Nequalities = self.Nx*self.Nt
+            self.Nequalities = self.Nx*(self.Nt+1)
             self.Ninequalities = 2*self.Nt*(self.Nx + self.Nu) + Xf.A.shape[0]
             self.Nconstraints = self.Nequalities + self.Ninequalities
 
@@ -109,11 +89,11 @@ class MPC():
             # R = diag(R, ..., R)
             self.R = scipy.linalg.block_diag(*([R] * N))
             # No lower limit, so -inf for all constraint entries
-            self.blower = np.full((self.Nconstraints,), -np.inf)
+            self.blowerIneq = np.full((self.Ninequalities,), -np.inf)
             # Sense is the type of constraints. Using 0, all inequalities
             senseEqual = np.full((self.Nequalities,), 5)
             senseInequal = np.full((self.Ninequalities,), 0)
-            self.sens = np.vstack((senseEqual,
+            self.sense = np.hstack((senseEqual,
                                    senseInequal))
 
             # Stack one time for upper bounds, one time for lower bounds
@@ -161,7 +141,7 @@ class MPC():
             self.H = np.matmul(np.matmul(np.transpose(self.G), self.Q), self.G) + self.R
             #test = np.linalg.cholesky(self.H) #To check if H is pos def
         else:
-            self.D = np.zeros(self.Nx*(self.Nt+1), self.Nx)
+            self.D = np.zeros((self.Nx*(self.Nt+1), self.Nx))
             self.D[0:self.Nx,0:self.Nx] = np.eye(self.Nx)
 
             self.Ez = np.eye(self.Nx*(self.Nt+1))
@@ -179,14 +159,21 @@ class MPC():
         # Linearize around x0
         self.UpdateLinearization(currentState)
 
+        if self.ref is not None:
+            deltaX = currentState - self.ref[0:self.Nx]
+        else:
+            deltaX = currentState
+
         # update matrices with new x0 (see licentiate thesis for formulas)
         if self.CONDENSED_MODEL:
-            self.f = 2*np.matmul(np.matmul(np.matmul(np.transpose(currentState), np.transpose(self.F)), self.Q), self.G)
-            self.bupper = self.b - np.matmul(np.matmul(self.Az, self.F), currentState)
+            self.f = 2*np.matmul(np.matmul(np.matmul(np.transpose(deltaX), np.transpose(self.F)), self.Q), self.G)
+            self.bupper = self.b - np.matmul(np.matmul(self.Az, self.F), deltaX)
         else:
-            self.f = np.full((self.Nt*(self.Nx+self.Nu),), 0)
-            self.bupper = np.vstack((np.matmul(self.D, currentState),
+            self.f = np.full((self.Nt*(self.Nx+self.Nu)+self.Nx,), 0)
+            self.bupper = np.hstack((np.matmul(self.D, deltaX),
                                      self.bIneq))
+            self.blower = np.hstack((np.matmul(self.D, deltaX),
+                                     self.blowerIneq))
 
     def Solve(self, currentState):
         # First update the QP based on the new state
@@ -203,7 +190,7 @@ class MPC():
                 A = scipy.sparse.csc_matrix(self.A)
                 self.m.setup(P=H, q=self.f, A=A, l=self.blower, u=self.bupper)
             else:
-                self.m.update(q=self.f, u=self.bupper)
+                self.m.update(q=self.f, l=self.blower, u=self.bupper)
             results = self.m.solve()
             uOptimal = results.x
         
@@ -213,13 +200,14 @@ class MPC():
         '''Returns the first control input'''
         # Transform orientation to roll pitch yaw
         currentState = input.squeeze()
-        orientation = Rotation.from_quat(currentState[6:10])
-        orientationStates = orientation.as_euler('zyx', degrees=False)
-        x0 = np.hstack((currentState[0:3], orientationStates, currentState[3:6], currentState[10:]))
+        # orientation = Rotation.from_quat(currentState[6:10])
+        # orientationStates = orientation.as_euler('zyx', degrees=False)
+        # x0 = np.hstack((currentState[0:3], orientationStates, currentState[3:6], currentState[10:]))
+        # print(x0)
 
         # Solve
-        uOptimal = self.Solve(x0)
-        
+        uOptimal = self.Solve(currentState)
+        #uOptimal[0:3] = 0
         return uOptimal[0:6]
 
     def GetControlSimulation(self,input):
@@ -229,9 +217,11 @@ class MPC():
 
         # Solve
         uOptimal = self.Solve(x0)
-        
+        #uOptimal[0:3] = 0
+        #uOptimal[4:6] = 0
         return uOptimal[0:6]
 
     def SetReference(self, xRef):
         # TODO: Make sure that reference is taken into consideration in solver
-        pass
+        if xRef is not None:
+            self.ref = xRef.flatten()

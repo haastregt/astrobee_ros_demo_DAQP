@@ -15,6 +15,9 @@ from astrobee import Astrobee
 from mpc import MPC
 from set_operations import SetOperations
 
+from scipy.spatial.transform import Rotation
+from MPCParams import MPCParams
+from MPCSolver import MPCSolver
 
 class SimpleControlExample(object):
     """
@@ -34,6 +37,8 @@ class SimpleControlExample(object):
         # State: [pos, vel, orientation (quat), angular vel (euler)]
         self.state = np.zeros((13, 1))
         self.state[9] = 1
+        # StateAsEuler:[pos,vel, orientation (roll pitch yaw), angular vel (euler)]
+        self.stateAsEuler = np.zeros((12,1))
         self.t0 = 0.0
         self.twist = None
         self.pose = None
@@ -83,6 +88,10 @@ class SimpleControlExample(object):
         # Update state variable
         self.state[0:3] = self.pose[0:3]
         self.state[6:10] = self.pose[3:7]
+
+        self.stateAsEuler[0:3] = self.pose[0:3]
+        orientation = Rotation.from_quat(self.pose.squeeze()[3:7])
+        self.stateAsEuler[6:9] = orientation.as_euler('xyz', degrees=False).reshape((3,1))
         return
 
     def twist_sub_cb(self, msg=geometry_msgs.msg.TwistStamped()):
@@ -103,6 +112,9 @@ class SimpleControlExample(object):
         # Update state variable
         self.state[3:6] = self.twist[0:3]
         self.state[10:13] = self.twist[3:6]
+
+        self.stateAsEuler[3:6] = self.twist[0:3]
+        self.stateAsEuler[9:12] = self.twist[3:6]
         return
 
     def start_srv_callback(self, req=std_srvs.srv.SetBoolRequest()):
@@ -280,11 +292,15 @@ class SimpleControlExample(object):
     # ---------------------------------
 
     def InitialiseController(self):
+        '''
         SET_TYPE = "LQR"  # Terminal invariant set type: select 'zero' or 'LQR'
         MPC_HORIZON = 10
-        Q = np.eye(12)
-        R = np.eye(6) * 0.01
-        referenceTrajectory = np.zeros((12, 1))
+        Q = np.eye(12) * 1
+        R = np.eye(6) * 10
+        R[3,3] = 100
+        R[4,4] = 100
+        R[5,5] = 100
+        referenceTrajectory = np.zeros((12, MPC_HORIZON))
 
         # Get the system
         honey = Astrobee()
@@ -296,7 +312,7 @@ class SimpleControlExample(object):
 
         # Instantiate limits
         u_lim = np.array([[0.85, 0.41, 0.41, 0.085, 0.041, 0.041]]).T
-        x_lim = 100 * np.array([[1.2, 0.1, 0.1,
+        x_lim = 100*np.array([[1.2, 0.1, 0.1,
                            0.5, 0.5, 0.5,
                            0.2, 0.2, 0.2,
                            0.1, 0.1, 0.1]]).T
@@ -349,7 +365,9 @@ class SimpleControlExample(object):
                   ulb=-u_lim, uub=u_lim,
                   xlb=-x_lim, xub=x_lim, Xf=Xf)
         self.ctl.SetReference(referenceTrajectory)
-
+        '''
+        params = MPCParams()
+        self.ctl = MPCSolver(params)
 
 
     def run(self):
@@ -378,12 +396,10 @@ class SimpleControlExample(object):
             # to the robot. The variable u_traj is an array containing a 3D force
             # (on u_traj[0:3]) and 3D torque (on u_traj[3:]).
             tin = rospy.get_time()
-            # TODO(@User): use your controller here
-            # self.u_traj = np.ones((6, ))
-            self.u_traj = self.ctl.GetControl(self.state)
-            print(self.u_traj)
-
+            #self.u_traj = self.ctl.GetControlSimulation(self.stateAsEuler)
+            self.u_traj = self.ctl.solve(self.stateAsEuler)
             tout = rospy.get_time() - tin
+
             rospy.loginfo("Time for control: " + str(tout))
 
             # Create control input message
