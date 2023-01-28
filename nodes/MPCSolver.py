@@ -63,7 +63,7 @@ class MPCSolver():
             self.SolveCVXPYgen(x0, xref)
             u0 = self.problem.var_dict['U'].value[:,0]
         elif self.method == "acados":
-            pass
+            u0 = self.SolveAcados(x0, xref)
         else:
             print("The method " + self.method + "is not a viable setting.")
 
@@ -117,4 +117,53 @@ class MPCSolver():
     def GenerateSolverAcados(self):
         ocp = AcadosOcp()
 
-        ocp.model = self.model
+        model = self.model.ExportAcadosModel()
+        ocp.model = model
+
+        ocp.cost.cost_type = 'EXTERNAL'
+        ocp.cost.cost_type_e = 'EXTERNAL' #e is for end (timestep N)
+        ocp.model.cost_expr_ext_cost = model.x.T @ self.Q @ model.x + model.u.T @ self.R @ model.u
+        ocp.model.cost_expr_ext_cost_e = model.x.T @ self.P @ model.x
+
+        #ocp.constraints.C = np.vstack((np.identity(self.Nx),np.zeros((self.Nu,self.Nx))))
+        #ocp.constraints.D = np.vstack((np.zeros((self.Nx,self.Nu)),np.identity(self.Nu)))
+        #ocp.constraints.ug = np.vstack((self.xub, self.uub))
+        #ocp.constraints.lg = np.vstack((self.xlb, self.ulb))
+
+        ocp.constraints.lbu = self.ulb
+        ocp.constraints.ubu = self.uub
+        ocp.constraints.idxbu = np.arange(self.Nu)
+
+        ocp.constraints.lbx = self.xlb
+        ocp.constraints.ubx = self.xub
+        ocp.constraints.idxbx = np.arange(self.Nx)
+
+        ocp.constraints.C_e = self.Xf.A
+        ocp.constraints.ug_e = self.Xf.b
+        ocp.constraints.lg_e = -100000000000000000*np.ones(np.size(self.Xf.b))
+
+        #ocp.constraints.lbx_0 = np.zeros((12,)) # This is just to initialise dimensions
+        #ocp.constraints.ubx_0 = np.zeros((12,))
+        #ocp.constraints.idxbx_0 = np.arange(self.Nx)
+        ocp.constraints.x0 = np.zeros((12,))
+
+        # set options
+        ocp.solver_options.qp_solver = self.solver # FULL_CONDENSING_QPOASES
+        # PARTIAL_CONDENSING_HPIPM, FULL_CONDENSING_QPOASES, FULL_CONDENSING_HPIPM,
+        # PARTIAL_CONDENSING_QPDUNES, PARTIAL_CONDENSING_OSQP, FULL_CONDENSING_DAQP
+        ocp.solver_options.hessian_approx = 'EXACT' # 'GAUSS_NEWTON', 'EXACT'
+        ocp.solver_options.integrator_type = 'DISCRETE' #'IRK', 'ERK', 'DISCRETE'
+        ocp.solver_options.nlp_solver_type = 'SQP' # SQP_RTI, SQP
+
+        # set prediction horizon
+        ocp.dims.N = self.Nt
+        ocp.solver_options.tf = self.Nt*self.dt # Final time
+
+        ocp_solver = AcadosOcpSolver(ocp, json_file = 'acados_ocp.json')
+
+        return ocp_solver
+        
+
+
+    def SolveAcados(self, x0, xref):
+        return self.problem.solve_for_x0(x0_bar = x0)

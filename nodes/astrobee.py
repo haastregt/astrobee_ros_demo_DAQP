@@ -1,5 +1,6 @@
 import numpy as np
 import casadi as ca
+from acados_template import AcadosModel
 from util import *
 
 
@@ -99,8 +100,8 @@ class Astrobee():
         :rtype: np.ndarray, ca.DM
         """
 
-        x_next = np.matmul(self.Ad, x.squeeze()) + np.matmul(self.Bd, u.squeeze())
-
+        #x_next = np.matmul(self.Ad, x.squeeze()) + np.matmul(self.Bd, u.squeeze())
+        x_next = ca.mtimes(self.Ad, x) + ca.mtimes(self.Bd, u)
         return x_next
 
     def CreateLinearizedDynamics(self):
@@ -173,3 +174,24 @@ class Astrobee():
         Ad, Bd, _, _ = self.CasadiC2D(A, B, C, D)
 
         return Ad, Bd
+
+    def ExportAcadosModel(self):
+        x = ca.MX.sym('x',12)
+        xdot = ca.MX.sym('xdot',12)
+        u = ca.MX.sym('u',6)
+
+        f_expl = self.NonlinearDynamics(x,u)
+        f_impl = xdot - f_expl
+        f_disc = self.LinearizedDiscreteDynamics(x,u)
+
+        model = AcadosModel()
+
+        model.f_impl_expr = f_impl
+        model.f_expl_expr = f_expl
+        model.disc_dyn_expr = f_disc
+        model.x = x
+        model.xdot = xdot
+        model.u = u
+        model.name = "nonlinear_astrobee_model"
+        
+        return model

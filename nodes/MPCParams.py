@@ -9,9 +9,9 @@ class MPCParams():
         '''
         Here are all tuneable parameters!
         '''
-        self.method = "cvxpygen"    # "manual", "cvxpygen", "acados"
-        self.solver = "OSQP"        # "OSQP", "DAQP"
-        self.qp_format = "sparse"   # "sparse", "dense"
+        self.method = "acados"    # "manual", "cvxpygen", "acados"
+        self.solver = "FULL_CONDENSING_DAQP"        # "OSQP", "DAQP"
+        self.qp_format = "dense"   # "sparse", "dense"
 
         self.MPC_HORIZON = 10  # Horizon length  
         self.SET_TYPE = "LQR"  # Terminal invariant set type: select 'zero' or 'LQR'
