@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+import time
 
 # Manual implementation
 from mpc import MPC
@@ -54,7 +55,14 @@ class MPCSolver():
         else:
             print("The method " + self.method + "is not a viable setting.")
 
+        # For diagnostic purposes
+        self.numIterations = 0
+        self.totalTime = 0
+
     def solve(self, x0, xref=None):
+        tstart = time.time()
+        self.numIterations += 1
+
         x0 = x0.squeeze()
         if self.method == "manual":
             self.problem.SetReference(xref)
@@ -66,6 +74,10 @@ class MPCSolver():
             u0 = self.SolveAcados(x0, xref)
         else:
             print("The method " + self.method + "is not a viable setting.")
+
+        self.totalTime += time.time() - tstart
+        averageTime = self.totalTime/self.numIterations
+        print("Average computational time over {} iterations is {} ms".format(self.numIterations, averageTime*1000))
 
         return u0
 
@@ -120,32 +132,39 @@ class MPCSolver():
         model = self.model.ExportAcadosModel()
         ocp.model = model
 
-        ocp.cost.cost_type = 'EXTERNAL'
-        ocp.cost.cost_type_e = 'EXTERNAL' #e is for end (timestep N)
+        # Used in case cost type is EXTERNAL
         ocp.model.cost_expr_ext_cost = model.x.T @ self.Q @ model.x + model.u.T @ self.R @ model.u
         ocp.model.cost_expr_ext_cost_e = model.x.T @ self.P @ model.x
 
-        #ocp.constraints.C = np.vstack((np.identity(self.Nx),np.zeros((self.Nu,self.Nx))))
-        #ocp.constraints.D = np.vstack((np.zeros((self.Nx,self.Nu)),np.identity(self.Nu)))
-        #ocp.constraints.ug = np.vstack((self.xub, self.uub))
-        #ocp.constraints.lg = np.vstack((self.xlb, self.ulb))
+        ocp.cost.cost_type = 'EXTERNAL'
+        ocp.cost.cost_type_e = 'EXTERNAL' #e is for end (timestep N)
 
-        ocp.constraints.lbu = self.ulb
-        ocp.constraints.ubu = self.uub
-        ocp.constraints.idxbu = np.arange(self.Nu)
+        
+        # Set the constraints. In the form lg < Cx + Du < ug
+        ocp.constraints.C = np.vstack((np.identity(self.Nx),np.zeros((self.Nu,self.Nx))))
+        ocp.constraints.D = np.vstack((np.zeros((self.Nx,self.Nu)),np.identity(self.Nu)))
+        ocp.constraints.ug = np.squeeze(np.vstack((self.xub, self.uub)))
+        ocp.constraints.lg = np.squeeze(np.vstack((self.xlb, self.ulb)))
 
-        ocp.constraints.lbx = self.xlb
-        ocp.constraints.ubx = self.xub
-        ocp.constraints.idxbx = np.arange(self.Nx)
+        '''
+        ocp.constraints.lbu = np.squeeze(self.ulb)
+        ocp.constraints.ubu = np.squeeze(self.uub)
+        #ocp.constraints.idxbu = np.array(range(self.Nu))
+        #ocp.constraints.idxbu = np.arange(self.Nu)
+        ocp.constraints.Jbu = np.eye(self.Nu)
 
+        ocp.constraints.lbx = np.squeeze(self.xlb)
+        ocp.constraints.ubx = np.squeeze(self.xub)
+        #ocp.constraints.idxbx = np.arange(self.Nx)
+        ocp.constraints.Jbx = np.eye(self.Nx)
+        '''
+        # Terminal constraints in the form lg < Cx < ug
         ocp.constraints.C_e = self.Xf.A
-        ocp.constraints.ug_e = self.Xf.b
-        ocp.constraints.lg_e = -100000000000000000*np.ones(np.size(self.Xf.b))
+        ocp.constraints.ug_e = np.squeeze(self.Xf.b)
+        ocp.constraints.lg_e = -1E15*np.ones(np.size(np.squeeze(self.Xf.b)))
 
-        #ocp.constraints.lbx_0 = np.zeros((12,)) # This is just to initialise dimensions
-        #ocp.constraints.ubx_0 = np.zeros((12,))
-        #ocp.constraints.idxbx_0 = np.arange(self.Nx)
-        ocp.constraints.x0 = np.zeros((12,))
+        # This is to initialise the dimensionality. Will be set to actual state when calling solve
+        ocp.constraints.x0 = np.zeros((self.Nx,))
 
         # set options
         ocp.solver_options.qp_solver = self.solver # FULL_CONDENSING_QPOASES
@@ -153,10 +172,9 @@ class MPCSolver():
         # PARTIAL_CONDENSING_QPDUNES, PARTIAL_CONDENSING_OSQP, FULL_CONDENSING_DAQP
         ocp.solver_options.hessian_approx = 'EXACT' # 'GAUSS_NEWTON', 'EXACT'
         ocp.solver_options.integrator_type = 'DISCRETE' #'IRK', 'ERK', 'DISCRETE'
-        ocp.solver_options.nlp_solver_type = 'SQP' # SQP_RTI, SQP
+        # ocp.solver_options.nlp_solver_type = 'SQP' # SQP_RTI, SQP
 
-        # set prediction horizon
-        ocp.dims.N = self.Nt
+        ocp.dims.N = self.Nt # Prediction horizon
         ocp.solver_options.tf = self.Nt*self.dt # Final time
 
         ocp_solver = AcadosOcpSolver(ocp, json_file = 'acados_ocp.json')
@@ -166,4 +184,5 @@ class MPCSolver():
 
 
     def SolveAcados(self, x0, xref):
-        return self.problem.solve_for_x0(x0_bar = x0)
+        u0 = self.problem.solve_for_x0(x0_bar = x0)
+        return u0 

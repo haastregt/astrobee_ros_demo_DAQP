@@ -113,7 +113,6 @@ class Astrobee():
         # Set CasADi variables
         x = ca.MX.sym('x', self.n)
         u = ca.MX.sym('u', self.m)
-
         # Jacobian of exact discretization
         Ac = ca.Function('Ac', [x, u], [ca.jacobian(
                          self.NonlinearDynamics(x, u), x)])
@@ -183,7 +182,6 @@ class Astrobee():
         f_expl = self.NonlinearDynamics(x,u)
         f_impl = xdot - f_expl
         f_disc = self.LinearizedDiscreteDynamics(x,u)
-
         model = AcadosModel()
 
         model.f_impl_expr = f_impl
@@ -192,6 +190,6 @@ class Astrobee():
         model.x = x
         model.xdot = xdot
         model.u = u
-        model.name = "nonlinear_astrobee_model"
+        model.name = "acados_astrobee_model"
         
         return model
