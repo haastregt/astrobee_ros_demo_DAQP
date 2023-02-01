@@ -395,12 +395,12 @@ class SimpleControlExample(object):
             # Here the user should modify the variable u_traj that is posteriorly sent
             # to the robot. The variable u_traj is an array containing a 3D force
             # (on u_traj[0:3]) and 3D torque (on u_traj[3:]).
-            tin = rospy.get_time()
+            #tin = rospy.get_time()
             #self.u_traj = self.ctl.GetControlSimulation(self.stateAsEuler)
             self.u_traj = self.ctl.solve(self.stateAsEuler)
-            tout = rospy.get_time() - tin
+            #tout = rospy.get_time() - tin
 
-            rospy.loginfo("Time for control: " + str(tout))
+            #rospy.loginfo("Time for control: " + str(tout))
 
             # Create control input message
             u = self.create_control_message()

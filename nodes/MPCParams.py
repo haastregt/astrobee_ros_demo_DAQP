@@ -9,8 +9,8 @@ class MPCParams():
         '''
         Here are all tuneable parameters!
         '''
-        self.method = "acados"    # "manual", "cvxpygen", "acados"
-        self.solver = "FULL_CONDENSING_DAQP"        # "OSQP", "DAQP"
+        self.method = "cvxpygen"    # "manual", "cvxpygen", "acados"
+        self.solver = "OSQP"        # "OSQP", "DAQP"
         self.qp_format = "dense"   # "sparse", "dense"
 
         self.MPC_HORIZON = 10  # Horizon length  
@@ -21,10 +21,10 @@ class MPCParams():
 
         # State and Control cost matrices
         self.Q = np.eye(12) * 1
-        self.R = np.eye(6) * 10
-        self.R[3,3] = 100
-        self.R[4,4] = 100
-        self.R[5,5] = 100
+        self.R = np.eye(6) * 10 #10
+        self.R[3,3] = 100 #100
+        self.R[4,4] = 100 #100
+        self.R[5,5] = 100 #100
 
         # Control and state bounds
         self.u_lim = np.array([[0.85, 0.41, 0.41, 0.085, 0.041, 0.041]]).T

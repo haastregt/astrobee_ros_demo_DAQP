@@ -11,12 +11,21 @@ from scipy.spatial.transform import Rotation
 from MPCParams import MPCParams
 from MPCSolver import MPCSolver
 
+#Quat = np.array([0, 0, 0.174, 0.985])
+#Orientation = Rotation.from_quat(Quat.squeeze())
+#EulerAngles = Orientation.as_euler('xyz', degrees=False)
+stateEuler = np.array([0, 1, 0, 0, 0, 0, 0, 0, 0.35, 0, 0, 0])
+#stateEuler[6:9] = EulerAngles
+#print(stateEuler)
+
 params = MPCParams()
 ctl = MPCSolver(params)
 state = np.zeros((12,1))
 state[0:3] = 0.1
-state[9] = 1
-u_traj = ctl.solve(state)
+
+
+#state[9] = 1
+u_traj = ctl.solve(stateEuler)
 print(u_traj)
 '''
 SET_TYPE = "LQR"  # Terminal invariant set type: select 'zero' or 'LQR'
