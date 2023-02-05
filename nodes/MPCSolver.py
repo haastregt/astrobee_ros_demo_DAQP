@@ -148,16 +148,31 @@ class MPCSolver():
         ocp.model.cost_expr_ext_cost = (model.x.T - model.p.T) @ self.Q @ (model.x - model.p) + model.u.T @ self.R @ model.u
         ocp.model.cost_expr_ext_cost_e = (model.x.T - model.p.T) @ self.P @ (model.x - model.p)
         
+        # Nonlinear constraints in the form hl < h(x,u,p) < hu where h() is con_h_expr
+        ocp.model.con_h_expr = model.x - model.p
+        ocp.constraints.uh = np.squeeze(self.xub)
+        ocp.constraints.lh = np.squeeze(self.xlb)
+
+        # Control constraints in the form lbu < Ju < ubu
+        ocp.constraints.Jbu = np.eye(self.Nu)
+        ocp.constraints.ubu = np.squeeze(self.uub)
+        ocp.constraints.lbu = np.squeeze(self.ulb)
+
+        # Terminal constraint
+        ocp.model.con_h_expr_e = self.Xf.A @ (model.x - model.p)
+        ocp.constraints.uh_e = np.squeeze(self.Xf.b)
+        ocp.constraints.lh_e = -1E15*np.ones(np.size(np.squeeze(self.Xf.b))) # No Inf support
+
         # Set the constraints. In the form lg < Cx + Du < ug
-        ocp.constraints.C = np.vstack((np.identity(self.Nx),np.zeros((self.Nu,self.Nx))))
-        ocp.constraints.D = np.vstack((np.zeros((self.Nx,self.Nu)),np.identity(self.Nu)))
-        ocp.constraints.ug = np.squeeze(np.vstack((self.xub, self.uub)))
-        ocp.constraints.lg = np.squeeze(np.vstack((self.xlb, self.ulb)))
+        # ocp.constraints.C = np.vstack((np.identity(self.Nx),np.zeros((self.Nu,self.Nx))))
+        # ocp.constraints.D = np.vstack((np.zeros((self.Nx,self.Nu)),np.identity(self.Nu)))
+        # ocp.constraints.ug = np.squeeze(np.vstack((self.xub, self.uub)))
+        # ocp.constraints.lg = np.squeeze(np.vstack((self.xlb, self.ulb)))
 
         # Terminal constraints in the form lg < Cx < ug
-        ocp.constraints.C_e = self.Xf.A
-        ocp.constraints.ug_e = np.squeeze(self.Xf.b)
-        ocp.constraints.lg_e = -1E15*np.ones(np.size(np.squeeze(self.Xf.b)))
+        # ocp.constraints.C_e = self.Xf.A
+        # ocp.constraints.ug_e = np.squeeze(self.Xf.b)
+        # ocp.constraints.lg_e = -1E15*np.ones(np.size(np.squeeze(self.Xf.b)))
 
         # This is to initialise the dimensionality. Will be set to actual state when calling solve
         ocp.constraints.x0 = np.zeros((self.Nx,))

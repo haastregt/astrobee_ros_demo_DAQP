@@ -11,7 +11,7 @@ sim_env = EmbeddedSimEnvironment(model=params.model,
                                  controller=solver.solve,
                                  time=20)
 
-stateEuler = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+stateEuler = np.array([0, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 sim_env.run(stateEuler)
 sim_env.visualize()
 solver.PrintComputationalTime()

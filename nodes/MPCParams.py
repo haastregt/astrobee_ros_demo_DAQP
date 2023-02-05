@@ -19,7 +19,7 @@ class MPCParams():
         # self.ComputeTerminalSet("LQR") # 'zero' or 'LQR'
         
         # Get the system (can be initialised with mass, inertia, and sampling time)
-        self.model = Astrobee() 
+        self.model = Astrobee(h=0.2) 
 
         # State and Control cost matrices
         self.Q = np.eye(12) * 1
@@ -30,7 +30,7 @@ class MPCParams():
 
         # Control and state bounds
         self.u_lim = np.array([[0.85, 0.41, 0.41, 0.085, 0.041, 0.041]]).T
-        self.x_lim = 100*np.array([[1.2, 0.1, 0.1,
+        self.x_lim = np.array([[1.2, 0.1, 0.1,
                                 0.5, 0.5, 0.5,
                                 0.2, 0.2, 0.2,
                                 0.1, 0.1, 0.1]]).T
@@ -38,8 +38,9 @@ class MPCParams():
         # Reference
         # TODO: Function to load reference trajectory from file?
         self.referenceTrajectory = np.zeros((12, 100))
-        self.referenceTrajectory[1,:75].fill(0.5)
-        self.referenceTrajectory[1,75:].fill(-0.5)
+        self.referenceTrajectory[1,:].fill(0.5)
+        self.referenceTrajectory[0,:75].fill(0.5)
+        self.referenceTrajectory[0,75:].fill(-0.5)
 
         # Solve the ARE for our system to extract the terminal weight matrix P
         self.P_LQR = np.matrix(scipy.linalg.solve_discrete_are(self.model.Ad, self.model.Bd, self.Q, self.R))
