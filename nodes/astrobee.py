@@ -175,9 +175,10 @@ class Astrobee():
         return Ad, Bd
 
     def ExportAcadosModel(self):
-        x = ca.MX.sym('x',12)
-        xdot = ca.MX.sym('xdot',12)
-        u = ca.MX.sym('u',6)
+        x = ca.MX.sym('x',self.n)
+        xdot = ca.MX.sym('xdot',self.n)
+        u = ca.MX.sym('u',self.m)
+        xref = ca.MX.sym('xref',self.n)
 
         f_expl = self.NonlinearDynamics(x,u)
         f_impl = xdot - f_expl
@@ -190,6 +191,7 @@ class Astrobee():
         model.x = x
         model.xdot = xdot
         model.u = u
+        model.p = xref
         model.name = "acados_astrobee_model"
         
         return model

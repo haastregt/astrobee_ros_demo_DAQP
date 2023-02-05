@@ -43,8 +43,7 @@ class MPCSolver():
         self.method = params.method
         self.solver = params.solver
         self.qp_format = params.qp_format
-
-        self.ref = None
+        self.referenceTrajectory = params.referenceTrajectory
 
         if self.method == "manual":
             self.problem = MPC(self.model,self.Nt,self.Q,self.P,self.R,self.ulb,self.uub,self.xlb,self.xub,self.Xf)
@@ -59,27 +58,38 @@ class MPCSolver():
         self.numIterations = 0
         self.totalTime = 0
 
-    def solve(self, x0, xref=None):
+    def solve(self, x0):
         tstart = time.time()
         self.numIterations += 1
 
         x0 = x0.squeeze()
         if self.method == "manual":
-            self.problem.SetReference(xref)
             u0 = self.problem.GetControl(x0)
         elif self.method == "cvxpygen":
-            self.SolveCVXPYgen(x0, xref)
+            self.SolveCVXPYgen(x0)
             u0 = self.problem.var_dict['U'].value[:,0]
         elif self.method == "acados":
-            u0 = self.SolveAcados(x0, xref)
+            u0 = self.SolveAcados(x0)
         else:
             print("The method " + self.method + "is not a viable setting.")
 
         self.totalTime += time.time() - tstart
-        averageTime = self.totalTime/self.numIterations
-        print("Average computational time over {} iterations is {} ms".format(self.numIterations, averageTime*1000))
-
         return u0
+
+    def set_reference(self, xref=0):
+        if self.method == "manual":
+            self.problem.SetReference(xref.squeeze())
+        elif self.method == "cvxpygen":
+            pass
+        elif self.method == "acados":
+            for i in range(self.numIterations, self.numIterations + self.Nt+1):
+                if i < self.referenceTrajectory.shape[1]:
+                    selected = self.referenceTrajectory[:,i].squeeze()
+                else:
+                    selected = self.referenceTrajectory[:,-1].squeeze()
+                self.problem.set(i,"p", selected)
+        else:
+            print("The method " + self.method + "is not a viable setting.")
 
     def GenerateSolverCVXPYgen(self):
         # define variables
@@ -119,7 +129,7 @@ class MPCSolver():
 
         return prob
 
-    def SolveCVXPYgen(self,x0,xref):
+    def SolveCVXPYgen(self,x0):
         self.problem.param_dict['A'].value = self.model.Ad
         self.problem.param_dict['B'].value = self.model.Bd
         self.problem.param_dict['x_init'].value = x0
@@ -132,13 +142,11 @@ class MPCSolver():
         model = self.model.ExportAcadosModel()
         ocp.model = model
 
-        # Used in case cost type is EXTERNAL
-        ocp.model.cost_expr_ext_cost = model.x.T @ self.Q @ model.x + model.u.T @ self.R @ model.u
-        ocp.model.cost_expr_ext_cost_e = model.x.T @ self.P @ model.x
-
+        # Set Cost. EXTERAL allows us to define a casadi function for the cost
         ocp.cost.cost_type = 'EXTERNAL'
         ocp.cost.cost_type_e = 'EXTERNAL' #e is for end (timestep N)
-
+        ocp.model.cost_expr_ext_cost = (model.x.T - model.p.T) @ self.Q @ (model.x - model.p) + model.u.T @ self.R @ model.u
+        ocp.model.cost_expr_ext_cost_e = (model.x.T - model.p.T) @ self.P @ (model.x - model.p)
         
         # Set the constraints. In the form lg < Cx + Du < ug
         ocp.constraints.C = np.vstack((np.identity(self.Nx),np.zeros((self.Nu,self.Nx))))
@@ -146,18 +154,6 @@ class MPCSolver():
         ocp.constraints.ug = np.squeeze(np.vstack((self.xub, self.uub)))
         ocp.constraints.lg = np.squeeze(np.vstack((self.xlb, self.ulb)))
 
-        '''
-        ocp.constraints.lbu = np.squeeze(self.ulb)
-        ocp.constraints.ubu = np.squeeze(self.uub)
-        #ocp.constraints.idxbu = np.array(range(self.Nu))
-        #ocp.constraints.idxbu = np.arange(self.Nu)
-        ocp.constraints.Jbu = np.eye(self.Nu)
-
-        ocp.constraints.lbx = np.squeeze(self.xlb)
-        ocp.constraints.ubx = np.squeeze(self.xub)
-        #ocp.constraints.idxbx = np.arange(self.Nx)
-        ocp.constraints.Jbx = np.eye(self.Nx)
-        '''
         # Terminal constraints in the form lg < Cx < ug
         ocp.constraints.C_e = self.Xf.A
         ocp.constraints.ug_e = np.squeeze(self.Xf.b)
@@ -165,14 +161,13 @@ class MPCSolver():
 
         # This is to initialise the dimensionality. Will be set to actual state when calling solve
         ocp.constraints.x0 = np.zeros((self.Nx,))
+        ocp.parameter_values = np.zeros((self.Nx,))
 
         # set options
-        ocp.solver_options.qp_solver = self.solver # FULL_CONDENSING_QPOASES
-        # PARTIAL_CONDENSING_HPIPM, FULL_CONDENSING_QPOASES, FULL_CONDENSING_HPIPM,
-        # PARTIAL_CONDENSING_QPDUNES, PARTIAL_CONDENSING_OSQP, FULL_CONDENSING_DAQP
+        ocp.solver_options.qp_solver = self.solver # FULL_CONDENSING_QPOASES PARTIAL_CONDENSING_HPIPM, FULL_CONDENSING_QPOASES, FULL_CONDENSING_HPIPM, PARTIAL_CONDENSING_QPDUNES, PARTIAL_CONDENSING_OSQP, FULL_CONDENSING_DAQP
         ocp.solver_options.hessian_approx = 'EXACT' # 'GAUSS_NEWTON', 'EXACT'
         ocp.solver_options.integrator_type = 'DISCRETE' #'IRK', 'ERK', 'DISCRETE'
-        # ocp.solver_options.nlp_solver_type = 'SQP' # SQP_RTI, SQP
+        #ocp.solver_options.nlp_solver_type = 'SQP' # SQP_RTI, SQP
 
         ocp.dims.N = self.Nt # Prediction horizon
         ocp.solver_options.tf = self.Nt*self.dt # Final time
@@ -180,9 +175,15 @@ class MPCSolver():
         ocp_solver = AcadosOcpSolver(ocp, json_file = 'acados_ocp.json')
 
         return ocp_solver
-        
 
-
-    def SolveAcados(self, x0, xref):
+    def SolveAcados(self, x0):
+        self.set_reference()
         u0 = self.problem.solve_for_x0(x0_bar = x0)
         return u0 
+
+    def PrintComputationalTime(self):
+        averageTime = self.totalTime/self.numIterations
+        print("Average computational time over {} iterations is {} ms".format(self.numIterations, averageTime*1000))
+        #if self.method == 'manual':
+        #    averageTime = self.problem.averageTime
+        return averageTime
