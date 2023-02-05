@@ -15,7 +15,7 @@ class MPC():
                  ulb=None, uub=None, xlb=None, xub=None, Xf=None):
 
         self.USE_DAQP = True
-        self.CONDENSED_MODEL = True
+        self.CONDENSED_MODEL = False
 
         self.FIRST_ITERATION = True
 
@@ -53,9 +53,9 @@ class MPC():
             # R = diag(R, ..., R)
             self.R = scipy.linalg.block_diag(*([R] * N))
             # No lower limit, so -inf for all constraint entries
-            self.blower = np.full((self.Nconstraints,), -np.inf)
+            self.blower = np.full((self.Nconstraints,), -np.inf).astype(c_double)
             # Sense is the type of constraints. Using 0, all inequalities
-            self.sense = np.full((self.Nconstraints,), 0)
+            self.sense = np.full((self.Nconstraints,), 0).astype(c_int)
 
             # Stack one time for upper bounds, one time for lower bounds
             stateConstraints = np.vstack((np.eye(self.Nx*self.Nt),
@@ -93,8 +93,8 @@ class MPC():
             # Sense is the type of constraints. Using 0, all inequalities
             senseEqual = np.full((self.Nequalities,), 5)
             senseInequal = np.full((self.Ninequalities,), 0)
-            self.sense = np.hstack((senseEqual,
-                                   senseInequal))
+            self.sense = np.squeeze(np.hstack((senseEqual,
+                                               senseInequal))).astype(c_int)
 
             # Stack one time for upper bounds, one time for lower bounds
             stateConstraints = np.vstack((np.eye(self.Nx*self.Nt),
@@ -119,8 +119,16 @@ class MPC():
                                     np.tile(uub.squeeze(), self.Nt),
                                     np.tile(-ulb.squeeze(), self.Nt)))
 
+            self.f = np.zeros((self.Nt*(self.Nx+self.Nu)+self.Nx, self.Nu+self.Nx)).astype(c_double)
+
+        self.UpdateLinearization(0)
+
         self.d = daqp.daqp()
         self.m = osqp.OSQP()
+
+        # For diagnostic purposes
+        self.numIterations = 0
+        self.totalTime = 0
 
     def UpdateLinearization(self, linearizationPoint):
         # Recompute matrices for new linearization point
@@ -137,8 +145,8 @@ class MPC():
                 for i in range(self.Nt-t):
                     self.G[(t+i+1)*self.Nx:(t+i+2)*self.Nx, i*self.Nu:(i+1)*self.Nu] = GProduct
 
-            self.A = np.matmul(self.Az, self.G) + self.Au
-            self.H = np.matmul(np.matmul(np.transpose(self.G), self.Q), self.G) + self.R
+            self.A = (np.matmul(self.Az, self.G) + self.Au).astype(c_double)
+            self.H = (np.matmul(np.matmul(np.transpose(self.G), self.Q), self.G) + self.R).astype(c_double)
             #test = np.linalg.cholesky(self.H) #To check if H is pos def
         else:
             self.D = np.zeros((self.Nx*(self.Nt+1), self.Nx))
@@ -151,29 +159,24 @@ class MPC():
                 self.Eu[(i+1)*self.Nx:(i+2)*self.Nx, i*self.Nu:(i+1)*self.Nu] = -Bd
             
             self.A = np.block([[self.Eu, self.Ez],
-                               [self.Au, self.Az]])
+                               [self.Au, self.Az]]).astype(c_double)
             self.H = np.block([[self.R, np.zeros((self.R.shape[0],self.Q.shape[1]))],
-                               [np.zeros((self.Q.shape[0],self.R.shape[1])), self.Q]])
+                               [np.zeros((self.Q.shape[0],self.R.shape[1])), self.Q]]).astype(c_double)
 
     def UpdateState(self, currentState):
         # Linearize around x0
-        self.UpdateLinearization(currentState)
+        # self.UpdateLinearization(currentState)
 
-        if self.ref is not None:
-            deltaX = currentState - self.ref[0:self.Nx]
-        else:
-            deltaX = currentState
-
-        # update matrices with new x0 (see licentiate thesis for formulas)
+        # TODO: use reference
+        deltaX = currentState
         if self.CONDENSED_MODEL:
-            self.f = 2*np.matmul(np.matmul(np.matmul(np.transpose(deltaX), np.transpose(self.F)), self.Q), self.G)
-            self.bupper = self.b - np.matmul(np.matmul(self.Az, self.F), deltaX)
+            self.f = 2*np.matmul(np.matmul(np.matmul(np.transpose(deltaX), np.transpose(self.F)), self.Q), self.G).astype(c_double)
+            self.bupper = self.b - np.matmul(np.matmul(self.Az, self.F), deltaX).astype(c_double)
         else:
-            self.f = np.full((self.Nt*(self.Nx+self.Nu)+self.Nx,), 0)
-            self.bupper = np.hstack((np.matmul(self.D, deltaX),
-                                     self.bIneq))
-            self.blower = np.hstack((np.matmul(self.D, deltaX),
-                                     self.blowerIneq))
+            self.bupper = np.squeeze(np.hstack((np.matmul(self.D, deltaX),
+                                                self.bIneq))).astype(c_double)
+            self.blower = np.squeeze(np.hstack((np.matmul(self.D, deltaX),
+                                                self.blowerIneq))).astype(c_double)
 
     def Solve(self, currentState):
         # First update the QP based on the new state
@@ -181,47 +184,40 @@ class MPC():
 
         # Solve
         if self.USE_DAQP:
+            tstart = time.time()
+            self.numIterations += 1
             (uOptimal, fval, exitflag, info) = self.d.quadprog(self.H,self.f,self.A,self.bupper,self.blower,self.sense)
             # TODO: Some exitflag checking
+
+            self.totalTime += time.time() - tstart
+            self.averageTime = self.totalTime/self.numIterations
+            # print("Average solver time over {} iterations is {} ms".format(self.numIterations, averageTime*1000))
         else:
+            tstart = time.time()
+            self.numIterations += 1
+
             if self.FIRST_ITERATION:
                 self.FIRST_ITERATION = False
                 H = scipy.sparse.csc_matrix(self.H)
                 A = scipy.sparse.csc_matrix(self.A)
-                self.m.setup(P=H, q=self.f, A=A, l=self.blower, u=self.bupper)
+                self.m.setup(P=H, q=self.f, A=A, l=self.blower, u=self.bupper, verbose=False)
             else:
                 self.m.update(q=self.f, l=self.blower, u=self.bupper)
+                
             results = self.m.solve()
+
+            self.totalTime += time.time() - tstart
+            self.averageTime = self.totalTime/self.numIterations
+            #print("Average solver time over {} iterations is {} ms".format(self.numIterations, averageTime*1000))
+
             uOptimal = results.x
-        
+
         return uOptimal
 
-    def GetControl(self, input):
+    def GetControl(self, currentState):
         '''Returns the first control input'''
-        # Transform orientation to roll pitch yaw
-        currentState = input.squeeze()
-        # orientation = Rotation.from_quat(currentState[6:10])
-        # orientationStates = orientation.as_euler('zyx', degrees=False)
-        # x0 = np.hstack((currentState[0:3], orientationStates, currentState[3:6], currentState[10:]))
-        # print(x0)
-
-        # Solve
-        uOptimal = self.Solve(currentState)
-        #uOptimal[0:3] = 0
-        return uOptimal[0:6]
-
-    def GetControlSimulation(self,input):
-        '''This is only used if the MPC class will be used by the non-nasa simulator'''
-        currentState = input.squeeze()
-        x0 = currentState
-
-        # Solve
-        uOptimal = self.Solve(x0)
-        #uOptimal[0:3] = 0
-        #uOptimal[4:6] = 0
+        uOptimal = self.Solve(currentState.squeeze())
         return uOptimal[0:6]
 
     def SetReference(self, xRef):
-        # TODO: Make sure that reference is taken into consideration in solver
-        if xRef is not None:
-            self.ref = xRef.flatten()
+        self.xref = xRef
